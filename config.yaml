@@ -1,0 +1,125 @@
+output:
+  format: csv # csv or json
+  local_output:
+    enabled: true
+    directory: processed-csv
+  s3:
+    enabled: false
+    bucket: ""
+    prefix: "aipass/exports"
+    region: "ap-northeast-1"
+
+date_ranges:
+  history:
+    start_offset_days: -2
+    end_offset_days: -2
+  onhand:
+    start_offset_days: -1
+    end_offset_days: 178
+  manual:
+    history:
+      start: ""
+      end: ""
+    onhand:
+      start: ""
+      end: ""
+
+datasets:
+  reservations:
+    primary_source: reservations
+    merge_key: reservation_id
+    output_fields:
+      - reservation_id
+      - check_in_date
+      - reserved_at
+      - reservation_status
+      - updated_at
+      - number_of_adults
+      - number_of_children
+      - total_amount
+      - sales_office_company_name
+      - package_plan_name
+      - external_confirmation_code
+      - total_stay_count
+      - name
+      - address
+      - phone_mobile
+      - email
+      - is_delivery_agreement
+      - guest_id
+    sources:
+      reservations:
+        path: /reservations
+        date_params:
+          start: start_date
+          end: end_date
+        fields:
+          - reservation_id
+          - check_in_date
+          - reserved_at
+          - reservation_status
+          - updated_at
+          - number_of_adults
+          - number_of_children
+          - total_amount
+          - sales_office_company_name
+          - package_plan_name
+          - external_confirmation_code
+      guests:
+        path: /guests
+        date_params:
+          start: start_date
+          end: end_date
+        fields:
+          - reservation_id
+          - total_stay_count
+          - name
+          - address
+          - phone_mobile
+          - email
+          - is_delivery_agreement
+          - guest_id
+
+  sales:
+    primary_source: sales
+    merge_key: reservation_id
+    output_fields:
+      - reservation_id
+      - sales_date
+      - sales_department_name
+      - sales_subject_name
+      - amount
+      - amount_excluding_tax
+      - quantity
+    sources:
+      sales:
+        path: /sales-details
+        date_params:
+          start: start_date
+          end: end_date
+        fields:
+          - reservation_id
+          - sales_date
+          - sales_department_name
+          - sales_subject_name
+          - amount
+          - amount_excluding_tax
+          - quantity
+
+  rooms:
+    primary_source: rooms
+    merge_key: reservation_id
+    output_fields:
+      - reservation_id
+      - room_usage_date
+      - room_number
+    sources:
+      rooms:
+        path: /housekeeping
+        date_params:
+          start: start_date
+          end: end_date
+        fields:
+          - reservation_id
+          - room_usage_date
+          - room_number
