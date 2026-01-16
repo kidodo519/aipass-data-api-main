@@ -81,12 +81,17 @@ def extract_records(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
-def fetch_paginated(url: str, headers: Dict[str, str], params: Dict[str, Any]) -> List[Dict[str, Any]]:
+def fetch_paginated(
+    url: str,
+    headers: Dict[str, str],
+    params: Dict[str, Any],
+    auth: Optional[Tuple[str, str]],
+) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     next_url = url
     next_params = params
     while next_url:
-        response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
+        response = requests.get(next_url, headers=headers, params=next_params, auth=auth, timeout=30)
         response.raise_for_status()
         records.extend(extract_records(response.json()))
         links = parse_link_header(response.headers.get("Link"))
@@ -164,6 +169,12 @@ def build_headers(token: str, token_header: str) -> Dict[str, str]:
     return headers
 
 
+def build_basic_auth(username: str, password: str) -> Optional[Tuple[str, str]]:
+    if username and password:
+        return username, password
+    return None
+
+
 def main() -> None:
     load_env(ENV_PATH)
     config = load_config(CONFIG_PATH)
@@ -171,10 +182,13 @@ def main() -> None:
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
     token = os.environ.get("API_TOKEN", "")
     token_header = os.environ.get("API_TOKEN_HEADER", "Authorization")
+    username = os.environ.get("API_USERNAME", "")
+    password = os.environ.get("API_PASSWORD", "")
     if not base_url:
         raise SystemExit("API_BASE_URL is required in .env")
 
     headers = build_headers(token, token_header)
+    auth = build_basic_auth(username, password)
 
     output_format = config.get("output", {}).get("format", "csv").lower()
     local_output = config.get("output", {}).get("local_output", {})
@@ -216,7 +230,7 @@ def main() -> None:
                         params["per_page"] = source["per_page"]
 
                     url = f"{base_url}{path}"
-                    records = fetch_paginated(url, headers, params)
+                    records = fetch_paginated(url, headers, params, auth)
                     fields = source.get("fields", [])
                     if fields:
                         records = filter_fields(records, fields)
