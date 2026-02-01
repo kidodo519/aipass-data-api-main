@@ -169,26 +169,49 @@ def build_headers(token: str, token_header: str) -> Dict[str, str]:
     return headers
 
 
-def build_basic_auth(username: str, password: str) -> Optional[Tuple[str, str]]:
-    if username and password:
-        return username, password
-    return None
+def fetch_access_token(auth_url: str, email: str, password: str) -> str:
+    response = requests.post(
+        auth_url,
+        data={"email": email, "password": password},
+        timeout=30,
+    )
+    response.raise_for_status()
+    payload = response.json()
+    token = payload.get("access_token")
+    if not token:
+        raise SystemExit("access_token not found in auth response.")
+    return str(token)
 
 
 def main() -> None:
     load_env(ENV_PATH)
     config = load_config(CONFIG_PATH)
 
+    api_env = os.environ.get("API_ENV", "").strip().lower()
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
+    if not base_url:
+        if api_env == "dev":
+            base_url = "https://api.dev.aipass.jp/public"
+        elif api_env == "prod":
+            base_url = "https://api.aipass.jp/public"
     token = os.environ.get("API_TOKEN", "")
     token_header = os.environ.get("API_TOKEN_HEADER", "Authorization")
-    username = os.environ.get("API_USERNAME", "")
+    email = os.environ.get("API_EMAIL") or os.environ.get("API_USERNAME", "")
     password = os.environ.get("API_PASSWORD", "")
+    auth_url = os.environ.get("API_AUTH_URL", f"{base_url}/oauth/token")
     if not base_url:
-        raise SystemExit("API_BASE_URL is required in .env")
+        raise SystemExit("API_BASE_URL is required in .env (or set API_ENV=dev|prod).")
+
+    if token.strip().lower() in {"", "your_token_here"}:
+        token = ""
+
+    if not token:
+        if not (email and password):
+            raise SystemExit("API_EMAIL (or API_USERNAME) and API_PASSWORD are required to fetch an access token.")
+        token = fetch_access_token(auth_url, email, password)
 
     headers = build_headers(token, token_header)
-    auth = build_basic_auth(username, password)
+    auth = None
 
     output_format = config.get("output", {}).get("format", "csv").lower()
     local_output = config.get("output", {}).get("local_output", {})
