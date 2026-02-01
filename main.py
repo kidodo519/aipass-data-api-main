@@ -210,6 +210,14 @@ def main() -> None:
             raise SystemExit("API_EMAIL (or API_USERNAME) and API_PASSWORD are required to fetch an access token.")
         token = fetch_access_token(auth_url, email, password)
 
+    if token.strip().lower() in {"", "your_token_here"}:
+        token = ""
+
+    if not token:
+        if not (email and password):
+            raise SystemExit("API_EMAIL (or API_USERNAME) and API_PASSWORD are required to fetch an access token.")
+        token = fetch_access_token(auth_url, email, password)
+
     headers = build_headers(token, token_header)
     auth = None
 
