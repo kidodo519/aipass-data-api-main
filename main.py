@@ -196,6 +196,9 @@ def main() -> None:
     if not base_url:
         raise SystemExit("API_BASE_URL is required in .env")
 
+    if token.strip().lower() in {"", "your_token_here"}:
+        token = ""
+
     if not token:
         if not (email and password):
             raise SystemExit("API_EMAIL (or API_USERNAME) and API_PASSWORD are required to fetch an access token.")
