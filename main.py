@@ -187,21 +187,14 @@ def main() -> None:
     load_env(ENV_PATH)
     config = load_config(CONFIG_PATH)
 
-    api_env = os.environ.get("API_ENV", "").strip().lower()
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
     if not base_url:
-        if api_env == "dev":
-            base_url = "https://api.dev.aipass.jp/public"
-        elif api_env == "prod":
-            base_url = "https://api.aipass.jp/public"
+        base_url = "https://api.aipass.jp/public"
     token = os.environ.get("API_TOKEN", "")
     token_header = os.environ.get("API_TOKEN_HEADER", "Authorization")
     email = os.environ.get("API_EMAIL") or os.environ.get("API_USERNAME", "")
     password = os.environ.get("API_PASSWORD", "")
     auth_url = os.environ.get("API_AUTH_URL", f"{base_url}/oauth/token")
-    if not base_url:
-        raise SystemExit("API_BASE_URL is required in .env (or set API_ENV=dev|prod).")
-
     if token.strip().lower() in {"", "your_token_here"}:
         token = ""
 
