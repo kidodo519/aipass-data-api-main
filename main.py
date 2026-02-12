@@ -2,7 +2,6 @@ import csv
 import datetime as dt
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -85,14 +84,17 @@ def fetch_paginated(
     url: str,
     headers: Dict[str, str],
     params: Dict[str, Any],
-    auth: Optional[Tuple[str, str]],
 ) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     next_url = url
     next_params = params
     while next_url:
-        response = requests.get(next_url, headers=headers, params=next_params, auth=auth, timeout=30)
-        response.raise_for_status()
+        response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
+        if response.status_code >= 400:
+            detail = response.text.strip() or "(empty response body)"
+            raise SystemExit(
+                f"API request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
+            )
         records.extend(extract_records(response.json()))
         links = parse_link_header(response.headers.get("Link"))
         next_url = links.get("next")
@@ -169,10 +171,22 @@ def build_headers(token: str, token_header: str) -> Dict[str, str]:
     return headers
 
 
-def build_basic_auth(username: str, password: str) -> Optional[Tuple[str, str]]:
-    if username and password:
-        return username, password
-    return None
+def fetch_access_token(auth_url: str, user_id: str, password: str) -> str:
+    response = requests.post(
+        auth_url,
+        data={"email": user_id, "password": password},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        detail = response.text.strip() or "(empty response body)"
+        raise SystemExit(
+            f"Token request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
+        )
+    payload = response.json()
+    token = payload.get("access_token")
+    if not token:
+        raise SystemExit("access_token not found in auth response.")
+    return str(token)
 
 
 def main() -> None:
@@ -180,15 +194,22 @@ def main() -> None:
     config = load_config(CONFIG_PATH)
 
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
+    if not base_url:
+        base_url = "https://api.aipass.jp/public"
     token = os.environ.get("API_TOKEN", "")
     token_header = os.environ.get("API_TOKEN_HEADER", "Authorization")
-    username = os.environ.get("API_USERNAME", "")
+    user_id = os.environ.get("API_ID", "")
     password = os.environ.get("API_PASSWORD", "")
-    if not base_url:
-        raise SystemExit("API_BASE_URL is required in .env")
+    auth_url = os.environ.get("API_AUTH_URL", f"{base_url}/oauth/token")
+    if token.strip().lower() in {"", "your_token_here"}:
+        token = ""
+
+    if not token:
+        if not (user_id and password):
+            raise SystemExit("API_ID and API_PASSWORD are required to fetch an access token.")
+        token = fetch_access_token(auth_url, user_id, password)
 
     headers = build_headers(token, token_header)
-    auth = build_basic_auth(username, password)
 
     output_format = config.get("output", {}).get("format", "csv").lower()
     local_output = config.get("output", {}).get("local_output", {})
@@ -230,7 +251,7 @@ def main() -> None:
                         params["per_page"] = source["per_page"]
 
                     url = f"{base_url}{path}"
-                    records = fetch_paginated(url, headers, params, auth)
+                    records = fetch_paginated(url, headers, params)
                     fields = source.get("fields", [])
                     if fields:
                         records = filter_fields(records, fields)
