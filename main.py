@@ -90,7 +90,11 @@ def fetch_paginated(
     next_params = params
     while next_url:
         response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
-        response.raise_for_status()
+        if response.status_code >= 400:
+            detail = response.text.strip() or "(empty response body)"
+            raise SystemExit(
+                f"API request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
+            )
         records.extend(extract_records(response.json()))
         links = parse_link_header(response.headers.get("Link"))
         next_url = links.get("next")
@@ -173,7 +177,11 @@ def fetch_access_token(auth_url: str, user_id: str, password: str) -> str:
         data={"email": user_id, "password": password},
         timeout=30,
     )
-    response.raise_for_status()
+    if response.status_code >= 400:
+        detail = response.text.strip() or "(empty response body)"
+        raise SystemExit(
+            f"Token request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
+        )
     payload = response.json()
     token = payload.get("access_token")
     if not token:

@@ -51,8 +51,8 @@ datasets:
       reservations:
         path: /reservations
         date_params:
-          start: start_date
-          end: end_date
+          start: check_in_date_from
+          end: check_in_date_to
         fields:
           - reservation_id
           - check_in_date
