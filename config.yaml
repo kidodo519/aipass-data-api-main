@@ -31,7 +31,7 @@ date_ranges:
 datasets:
   reservations:
     primary_source: reservations
-    merge_key: reservation_id
+    merge_key: guest_id
     output_fields:
       - reservation_id
       - check_in_date
