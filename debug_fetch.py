@@ -12,6 +12,28 @@ import requests
 DEFAULT_BASE_URL = "https://api.aipass.jp/public"
 
 
+def load_env(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        if "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"'))
+
+
+def parse_date_arg(raw_value: str, arg_name: str) -> dt.date:
+    try:
+        return dt.date.fromisoformat(raw_value)
+    except ValueError as exc:
+        raise SystemExit(
+            f"Invalid {arg_name}: '{raw_value}'. Use YYYY-MM-DD with a real calendar date (e.g. 2026-02-28)."
+        ) from exc
+
+
 def build_headers(token: str, token_header: str = "Authorization") -> Dict[str, str]:
     headers = {"Accept": "application/json"}
     if token:
@@ -105,6 +127,8 @@ def write_json(path: Path, records: List[Dict[str, Any]]) -> None:
 
 
 def main() -> None:
+    load_env(Path(".env"))
+
     parser = argparse.ArgumentParser(description="Debug fetch for reservations/guests full data in a period")
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
@@ -113,8 +137,10 @@ def main() -> None:
     parser.add_argument("--csv-encoding", default="utf-8-sig")
     args = parser.parse_args()
 
-    start = dt.date.fromisoformat(args.start_date)
-    end = dt.date.fromisoformat(args.end_date)
+    start = parse_date_arg(args.start_date, "--start-date")
+    end = parse_date_arg(args.end_date, "--end-date")
+    if start > end:
+        raise SystemExit(f"Invalid date range: --start-date ({start}) must be <= --end-date ({end}).")
 
     base_url = os.environ.get("API_BASE_URL", DEFAULT_BASE_URL).rstrip("/")
     token = os.environ.get("API_TOKEN", "")
