@@ -2,7 +2,6 @@ import csv
 import datetime as dt
 import json
 import os
-import sys
 import tempfile
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -41,8 +40,10 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 
 def resolve_date_range(config: Dict[str, Any], range_name: str) -> Tuple[dt.date, dt.date]:
-    manual = config.get("date_ranges", {}).get("manual", {}).get(range_name, {})
-    if manual.get("start") and manual.get("end"):
+    manual_config = config.get("date_ranges", {}).get("manual", {})
+    manual_enabled = bool(manual_config.get("enabled", False))
+    manual = manual_config.get(range_name, {})
+    if manual_enabled and manual.get("start") and manual.get("end"):
         start = dt.date.fromisoformat(manual["start"])
         end = dt.date.fromisoformat(manual["end"])
         return start, end
@@ -52,6 +53,17 @@ def resolve_date_range(config: Dict[str, Any], range_name: str) -> Tuple[dt.date
     end_offset = int(offsets.get("end_offset_days", 0))
     today = dt.date.today()
     return today + dt.timedelta(days=start_offset), today + dt.timedelta(days=end_offset)
+
+
+def format_date_param(param_name: str, value: dt.date, is_end: bool) -> str:
+    if param_name.endswith("_at_from"):
+        return f"{value.isoformat()}T00:00:00+09:00"
+    if param_name.endswith("_at_to"):
+        return f"{value.isoformat()}T23:59:59+09:00"
+    if param_name.endswith("_at"):
+        time_part = "23:59:59" if is_end else "00:00:00"
+        return f"{value.isoformat()}T{time_part}+09:00"
+    return value.isoformat()
 
 
 def parse_link_header(link_header: Optional[str]) -> Dict[str, str]:
@@ -81,18 +93,74 @@ def extract_records(payload: Any) -> List[Dict[str, Any]]:
     return []
 
 
+def get_nested_value(data: Any, path: str, root: Optional[Dict[str, Any]] = None) -> Any:
+    current = root if path.startswith("root.") and root is not None else data
+    parts = path.split(".")
+    if path.startswith("root."):
+        parts = parts[1:]
+    for part in parts:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+        if current is None:
+            return None
+    return current
+
+
+def apply_field_paths(
+    records: List[Dict[str, Any]],
+    field_paths: Dict[str, str],
+    root_records: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    if not field_paths:
+        return records
+    mapped: List[Dict[str, Any]] = []
+    for index, record in enumerate(records):
+        root_record = root_records[index] if root_records and index < len(root_records) else None
+        converted = dict(record)
+        for output_field, path_expr in field_paths.items():
+            value = None
+            for candidate in path_expr.split("|"):
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                value = get_nested_value(record, candidate, root_record)
+                if value is not None:
+                    break
+            converted[output_field] = value
+        mapped.append(converted)
+    return mapped
+
+
+def explode_records(records: List[Dict[str, Any]], explode_key: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    exploded: List[Dict[str, Any]] = []
+    roots: List[Dict[str, Any]] = []
+    for record in records:
+        items = record.get(explode_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                exploded.append(item)
+                roots.append(record)
+    return exploded, roots
+
+
 def fetch_paginated(
     url: str,
     headers: Dict[str, str],
     params: Dict[str, Any],
-    auth: Optional[Tuple[str, str]],
 ) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     next_url = url
     next_params = params
     while next_url:
-        response = requests.get(next_url, headers=headers, params=next_params, auth=auth, timeout=30)
-        response.raise_for_status()
+        response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
+        if response.status_code >= 400:
+            detail = response.text.strip() or "(empty response body)"
+            raise SystemExit(
+                f"API request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
+            )
         records.extend(extract_records(response.json()))
         links = parse_link_header(response.headers.get("Link"))
         next_url = links.get("next")
@@ -134,9 +202,9 @@ def merge_records(
     return merged
 
 
-def write_csv(path: Path, records: List[Dict[str, Any]], fields: List[str]) -> None:
+def write_csv(path: Path, records: List[Dict[str, Any]], fields: List[str], encoding: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as file:
+    with path.open("w", encoding=encoding, newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
         for record in records:
@@ -169,10 +237,22 @@ def build_headers(token: str, token_header: str) -> Dict[str, str]:
     return headers
 
 
-def build_basic_auth(username: str, password: str) -> Optional[Tuple[str, str]]:
-    if username and password:
-        return username, password
-    return None
+def fetch_access_token(auth_url: str, user_id: str, password: str) -> str:
+    response = requests.post(
+        auth_url,
+        data={"email": user_id, "password": password},
+        timeout=30,
+    )
+    if response.status_code >= 400:
+        detail = response.text.strip() or "(empty response body)"
+        raise SystemExit(
+            f"Token request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
+        )
+    payload = response.json()
+    token = payload.get("access_token")
+    if not token:
+        raise SystemExit("access_token not found in auth response.")
+    return str(token)
 
 
 def main() -> None:
@@ -180,17 +260,28 @@ def main() -> None:
     config = load_config(CONFIG_PATH)
 
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
+    if not base_url:
+        base_url = "https://api.aipass.jp/public"
     token = os.environ.get("API_TOKEN", "")
     token_header = os.environ.get("API_TOKEN_HEADER", "Authorization")
-    username = os.environ.get("API_USERNAME", "")
+    user_id = os.environ.get("API_ID", "")
     password = os.environ.get("API_PASSWORD", "")
-    if not base_url:
-        raise SystemExit("API_BASE_URL is required in .env")
+    auth_url = os.environ.get("API_AUTH_URL", f"{base_url}/oauth/token")
+    if token.strip().lower() in {"", "your_token_here"}:
+        token = ""
+
+    if not token:
+        if not (user_id and password):
+            raise SystemExit("API_ID and API_PASSWORD are required to fetch an access token.")
+        token = fetch_access_token(auth_url, user_id, password)
 
     headers = build_headers(token, token_header)
-    auth = build_basic_auth(username, password)
 
     output_format = config.get("output", {}).get("format", "csv").lower()
+    csv_config = config.get("output", {}).get("csv", {})
+    csv_prefix = str(csv_config.get("prefix", "")).strip()
+    csv_encoding = str(csv_config.get("encoding", "utf-8-sig")).strip() or "utf-8-sig"
+    output_date_suffix = dt.date.today().strftime("%Y%m%d")
     local_output = config.get("output", {}).get("local_output", {})
     local_enabled = bool(local_output.get("enabled", True))
     local_dir = Path(local_output.get("directory", "processed-csv"))
@@ -223,14 +314,23 @@ def main() -> None:
                     date_params = source.get("date_params", {})
                     params = dict(source.get("params", {}))
                     if date_params.get("start"):
-                        params[date_params["start"]] = start_date.isoformat()
+                        params[date_params["start"]] = format_date_param(date_params["start"], start_date, is_end=False)
                     if date_params.get("end"):
-                        params[date_params["end"]] = end_date.isoformat()
+                        params[date_params["end"]] = format_date_param(date_params["end"], end_date, is_end=True)
                     if source.get("per_page"):
                         params["per_page"] = source["per_page"]
 
                     url = f"{base_url}{path}"
-                    records = fetch_paginated(url, headers, params, auth)
+                    records = fetch_paginated(url, headers, params)
+                    explode_key = source.get("explode")
+                    root_records = None
+                    if explode_key:
+                        records, root_records = explode_records(records, explode_key)
+
+                    field_paths = source.get("field_paths", {})
+                    if field_paths:
+                        records = apply_field_paths(records, field_paths, root_records)
+
                     fields = source.get("fields", [])
                     if fields:
                         records = filter_fields(records, fields)
@@ -249,7 +349,10 @@ def main() -> None:
                     merged_records = filter_fields(merged_records, output_fields)
 
                 extension = "json" if output_format == "json" else "csv"
-                filename = f"{dataset_name}_{range_name}.{extension}"
+                base_name = f"{dataset_name}_{range_name}_{output_date_suffix}"
+                if output_format == "csv" and csv_prefix:
+                    base_name = f"{csv_prefix}{base_name}"
+                filename = f"{base_name}.{extension}"
                 if local_enabled:
                     output_path = local_dir / filename
                 else:
@@ -258,7 +361,12 @@ def main() -> None:
                 if output_format == "json":
                     write_json(output_path, merged_records)
                 else:
-                    write_csv(output_path, merged_records, output_fields or sorted(merged_records[0].keys()) if merged_records else [])
+                    write_csv(
+                        output_path,
+                        merged_records,
+                        output_fields or sorted(merged_records[0].keys()) if merged_records else [],
+                        csv_encoding,
+                    )
 
                 if s3_enabled:
                     bucket = s3_config.get("bucket")
