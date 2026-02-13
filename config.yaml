@@ -55,6 +55,8 @@ datasets:
     sources:
       reservations:
         path: /reservations
+        params:
+          include_related_guest: 1
         date_params:
           start: check_in_date_from
           end: check_in_date_to
