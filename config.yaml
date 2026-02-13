@@ -1,5 +1,8 @@
 output:
   format: csv # csv or json
+  csv:
+    prefix: ""
+    encoding: "utf-8-sig"
   local_output:
     enabled: true
     directory: processed-csv
@@ -17,6 +20,7 @@ date_ranges:
     start_offset_days: -1
     end_offset_days: 178
   manual:
+    enabled: false
     history:
       start: ""
       end: ""
@@ -27,7 +31,7 @@ date_ranges:
 datasets:
   reservations:
     primary_source: reservations
-    merge_key: reservation_id
+    merge_key: guest_id
     output_fields:
       - reservation_id
       - check_in_date
@@ -68,10 +72,9 @@ datasets:
       guests:
         path: /guests
         date_params:
-          start: created_at_from
-          end: created_at_to
+          start: updated_at_from
+          end: updated_at_to
         fields:
-          - reservation_id
           - total_stay_count
           - name
           - address
@@ -97,6 +100,10 @@ datasets:
         date_params:
           start: sales_date_from
           end: sales_date_to
+        field_paths:
+          reservation_id: reservation.reservation_id
+          sales_department_name: sales_department.sales_department_name
+          sales_subject_name: sales_subject.sales_subject_name
         fields:
           - reservation_id
           - sales_date
@@ -115,9 +122,15 @@ datasets:
       - room_number
     sources:
       rooms:
-        path: /housekeeping
+        path: /reservations
         date_params:
-          start: room_usage_date
+          start: check_in_date_from
+          end: check_in_date_to
+        explode: assign_rooms
+        field_paths:
+          reservation_id: root.reservation_id
+          room_usage_date: room_usage_start_date
+          room_number: room.room_number|room_number|room.number
         fields:
           - reservation_id
           - room_usage_date

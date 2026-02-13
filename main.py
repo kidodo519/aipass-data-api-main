@@ -40,8 +40,10 @@ def load_config(path: Path) -> Dict[str, Any]:
 
 
 def resolve_date_range(config: Dict[str, Any], range_name: str) -> Tuple[dt.date, dt.date]:
-    manual = config.get("date_ranges", {}).get("manual", {}).get(range_name, {})
-    if manual.get("start") and manual.get("end"):
+    manual_config = config.get("date_ranges", {}).get("manual", {})
+    manual_enabled = bool(manual_config.get("enabled", False))
+    manual = manual_config.get(range_name, {})
+    if manual_enabled and manual.get("start") and manual.get("end"):
         start = dt.date.fromisoformat(manual["start"])
         end = dt.date.fromisoformat(manual["end"])
         return start, end
@@ -89,6 +91,59 @@ def extract_records(payload: Any) -> List[Dict[str, Any]]:
                 return [item for item in payload[key] if isinstance(item, dict)]
         return [payload]
     return []
+
+
+def get_nested_value(data: Any, path: str, root: Optional[Dict[str, Any]] = None) -> Any:
+    current = root if path.startswith("root.") and root is not None else data
+    parts = path.split(".")
+    if path.startswith("root."):
+        parts = parts[1:]
+    for part in parts:
+        if not isinstance(current, dict):
+            return None
+        current = current.get(part)
+        if current is None:
+            return None
+    return current
+
+
+def apply_field_paths(
+    records: List[Dict[str, Any]],
+    field_paths: Dict[str, str],
+    root_records: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
+    if not field_paths:
+        return records
+    mapped: List[Dict[str, Any]] = []
+    for index, record in enumerate(records):
+        root_record = root_records[index] if root_records and index < len(root_records) else None
+        converted = dict(record)
+        for output_field, path_expr in field_paths.items():
+            value = None
+            for candidate in path_expr.split("|"):
+                candidate = candidate.strip()
+                if not candidate:
+                    continue
+                value = get_nested_value(record, candidate, root_record)
+                if value is not None:
+                    break
+            converted[output_field] = value
+        mapped.append(converted)
+    return mapped
+
+
+def explode_records(records: List[Dict[str, Any]], explode_key: str) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    exploded: List[Dict[str, Any]] = []
+    roots: List[Dict[str, Any]] = []
+    for record in records:
+        items = record.get(explode_key)
+        if not isinstance(items, list):
+            continue
+        for item in items:
+            if isinstance(item, dict):
+                exploded.append(item)
+                roots.append(record)
+    return exploded, roots
 
 
 def fetch_paginated(
@@ -147,9 +202,9 @@ def merge_records(
     return merged
 
 
-def write_csv(path: Path, records: List[Dict[str, Any]], fields: List[str]) -> None:
+def write_csv(path: Path, records: List[Dict[str, Any]], fields: List[str], encoding: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8", newline="") as file:
+    with path.open("w", encoding=encoding, newline="") as file:
         writer = csv.DictWriter(file, fieldnames=fields)
         writer.writeheader()
         for record in records:
@@ -224,6 +279,10 @@ def main() -> None:
     headers = build_headers(token, token_header)
 
     output_format = config.get("output", {}).get("format", "csv").lower()
+    csv_config = config.get("output", {}).get("csv", {})
+    csv_prefix = str(csv_config.get("prefix", "")).strip()
+    csv_encoding = str(csv_config.get("encoding", "utf-8-sig")).strip() or "utf-8-sig"
+    output_date_suffix = dt.date.today().strftime("%Y%m%d")
     local_output = config.get("output", {}).get("local_output", {})
     local_enabled = bool(local_output.get("enabled", True))
     local_dir = Path(local_output.get("directory", "processed-csv"))
@@ -264,6 +323,15 @@ def main() -> None:
 
                     url = f"{base_url}{path}"
                     records = fetch_paginated(url, headers, params)
+                    explode_key = source.get("explode")
+                    root_records = None
+                    if explode_key:
+                        records, root_records = explode_records(records, explode_key)
+
+                    field_paths = source.get("field_paths", {})
+                    if field_paths:
+                        records = apply_field_paths(records, field_paths, root_records)
+
                     fields = source.get("fields", [])
                     if fields:
                         records = filter_fields(records, fields)
@@ -282,7 +350,10 @@ def main() -> None:
                     merged_records = filter_fields(merged_records, output_fields)
 
                 extension = "json" if output_format == "json" else "csv"
-                filename = f"{dataset_name}_{range_name}.{extension}"
+                base_name = f"{dataset_name}_{range_name}_{output_date_suffix}"
+                if output_format == "csv" and csv_prefix:
+                    base_name = f"{csv_prefix}{base_name}"
+                filename = f"{base_name}.{extension}"
                 if local_enabled:
                     output_path = local_dir / filename
                 else:
@@ -291,7 +362,12 @@ def main() -> None:
                 if output_format == "json":
                     write_json(output_path, merged_records)
                 else:
-                    write_csv(output_path, merged_records, output_fields or sorted(merged_records[0].keys()) if merged_records else [])
+                    write_csv(
+                        output_path,
+                        merged_records,
+                        output_fields or sorted(merged_records[0].keys()) if merged_records else [],
+                        csv_encoding,
+                    )
 
                 if s3_enabled:
                     bucket = s3_config.get("bucket")
