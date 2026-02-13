@@ -12,6 +12,19 @@ import requests
 DEFAULT_BASE_URL = "https://api.aipass.jp/public"
 
 
+def load_env(path: Path) -> None:
+    if not path.exists():
+        return
+    for line in path.read_text(encoding="utf-8").splitlines():
+        raw = line.strip()
+        if not raw or raw.startswith("#"):
+            continue
+        if "=" not in raw:
+            continue
+        key, value = raw.split("=", 1)
+        os.environ.setdefault(key.strip(), value.strip().strip('"'))
+
+
 def parse_date_arg(raw_value: str, arg_name: str) -> dt.date:
     try:
         return dt.date.fromisoformat(raw_value)
@@ -114,6 +127,8 @@ def write_json(path: Path, records: List[Dict[str, Any]]) -> None:
 
 
 def main() -> None:
+    load_env(Path(".env"))
+
     parser = argparse.ArgumentParser(description="Debug fetch for reservations/guests full data in a period")
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
