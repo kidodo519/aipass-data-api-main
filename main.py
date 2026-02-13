@@ -53,6 +53,17 @@ def resolve_date_range(config: Dict[str, Any], range_name: str) -> Tuple[dt.date
     return today + dt.timedelta(days=start_offset), today + dt.timedelta(days=end_offset)
 
 
+def format_date_param(param_name: str, value: dt.date, is_end: bool) -> str:
+    if param_name.endswith("_at_from"):
+        return f"{value.isoformat()}T00:00:00+09:00"
+    if param_name.endswith("_at_to"):
+        return f"{value.isoformat()}T23:59:59+09:00"
+    if param_name.endswith("_at"):
+        time_part = "23:59:59" if is_end else "00:00:00"
+        return f"{value.isoformat()}T{time_part}+09:00"
+    return value.isoformat()
+
+
 def parse_link_header(link_header: Optional[str]) -> Dict[str, str]:
     if not link_header:
         return {}
@@ -245,9 +256,9 @@ def main() -> None:
                     date_params = source.get("date_params", {})
                     params = dict(source.get("params", {}))
                     if date_params.get("start"):
-                        params[date_params["start"]] = start_date.isoformat()
+                        params[date_params["start"]] = format_date_param(date_params["start"], start_date, is_end=False)
                     if date_params.get("end"):
-                        params[date_params["end"]] = end_date.isoformat()
+                        params[date_params["end"]] = format_date_param(date_params["end"], end_date, is_end=True)
                     if source.get("per_page"):
                         params["per_page"] = source["per_page"]
 
