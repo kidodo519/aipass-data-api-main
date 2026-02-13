@@ -1,5 +1,8 @@
 output:
   format: csv # csv or json
+  csv:
+    prefix: ""
+    encoding: "utf-8-sig"
   local_output:
     enabled: true
     directory: processed-csv
@@ -17,6 +20,7 @@ date_ranges:
     start_offset_days: -1
     end_offset_days: 178
   manual:
+    enabled: false
     history:
       start: ""
       end: ""
@@ -41,18 +45,28 @@ datasets:
       - package_plan_name
       - external_confirmation_code
       - total_stay_count
-      - name
-      - address
+      - guest_id
+      - name_first
+      - name_last
       - phone_mobile
       - email
       - is_delivery_agreement
-      - guest_id
+      - address
     sources:
       reservations:
         path: /reservations
         date_params:
-          start: start_date
-          end: end_date
+          start: check_in_date_from
+          end: check_in_date_to
+        field_paths:
+          total_stay_count: related_guest.total_stay_count
+          guest_id: related_guest.guest_id
+          name_first: related_guest.name_first
+          name_last: related_guest.name_last
+          phone_mobile: related_guest.phone_mobile
+          email: related_guest.email
+          is_delivery_agreement: related_guest.is_delivery_agreement
+          address: related_guest.address
         fields:
           - reservation_id
           - check_in_date
@@ -65,20 +79,14 @@ datasets:
           - sales_office_company_name
           - package_plan_name
           - external_confirmation_code
-      guests:
-        path: /guests
-        date_params:
-          start: start_date
-          end: end_date
-        fields:
-          - reservation_id
           - total_stay_count
-          - name
-          - address
+          - guest_id
+          - name_first
+          - name_last
           - phone_mobile
           - email
           - is_delivery_agreement
-          - guest_id
+          - address
 
   sales:
     primary_source: sales
@@ -95,8 +103,12 @@ datasets:
       sales:
         path: /sales-details
         date_params:
-          start: start_date
-          end: end_date
+          start: sales_date_from
+          end: sales_date_to
+        field_paths:
+          reservation_id: reservation.reservation_id
+          sales_department_name: sales_department.sales_department_name
+          sales_subject_name: sales_subject.sales_subject_name
         fields:
           - reservation_id
           - sales_date
@@ -115,10 +127,15 @@ datasets:
       - room_number
     sources:
       rooms:
-        path: /housekeeping
+        path: /reservations
         date_params:
-          start: start_date
-          end: end_date
+          start: check_in_date_from
+          end: check_in_date_to
+        explode: assign_rooms
+        field_paths:
+          reservation_id: root.reservation_id
+          room_usage_date: room_usage_start_date
+          room_number: room.room_number|room_number|room.number
         fields:
           - reservation_id
           - room_usage_date
