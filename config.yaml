@@ -51,8 +51,8 @@ datasets:
       reservations:
         path: /reservations
         date_params:
-          start: start_date
-          end: end_date
+          start: check_in_date_from
+          end: check_in_date_to
         fields:
           - reservation_id
           - check_in_date
@@ -68,8 +68,8 @@ datasets:
       guests:
         path: /guests
         date_params:
-          start: start_date
-          end: end_date
+          start: created_at_from
+          end: created_at_to
         fields:
           - reservation_id
           - total_stay_count
@@ -95,8 +95,8 @@ datasets:
       sales:
         path: /sales-details
         date_params:
-          start: start_date
-          end: end_date
+          start: sales_date_from
+          end: sales_date_to
         fields:
           - reservation_id
           - sales_date
@@ -117,8 +117,7 @@ datasets:
       rooms:
         path: /housekeeping
         date_params:
-          start: start_date
-          end: end_date
+          start: room_usage_date
         fields:
           - reservation_id
           - room_usage_date
