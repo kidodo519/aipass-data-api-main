@@ -204,6 +204,7 @@ def main() -> None:
     load_env(ENV_PATH)
     config = load_config(CONFIG_PATH)
 
+    api_env = os.environ.get("API_ENV", "").strip().lower()
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
     if not base_url:
         base_url = "https://api.aipass.jp/public"
