@@ -34,4 +34,4 @@ python main.py
 - This script is production-only. If `API_BASE_URL` is unset, it defaults to `https://api.aipass.jp/public`.
 - If you only have an ID/password (no API token), set `API_ID` and `API_PASSWORD` and leave `API_TOKEN` empty (or keep the placeholder `your_token_here`). The script will request an access token from `{API_BASE_URL}/oauth/token` by default.
 - To override the token endpoint, set `API_AUTH_URL` explicitly (e.g., `https://api.aipass.jp/public/oauth/token`).
-- `/reservations` は `start_date` / `end_date` ではなく、仕様どおり `check_in_date_from` / `check_in_date_to` で取得する設定にしています（日時系条件が1つ以上必須）。
+- 全エンドポイント（`/reservations`・`/guests`・`/sales-details`・`/housekeeping`）は `start_date` / `end_date` ではなく、`check_in_date_from` / `check_in_date_to` で取得する設定にしています。
