@@ -18,6 +18,7 @@ except ImportError as exc:
 
 ENV_PATH = Path(".env")
 CONFIG_PATH = Path("config.yaml")
+MAX_REQUEST_RANGE_DAYS = 30
 
 
 def load_env(path: Path) -> None:
@@ -64,6 +65,20 @@ def format_date_param(param_name: str, value: dt.date, is_end: bool) -> str:
         time_part = "23:59:59" if is_end else "00:00:00"
         return f"{value.isoformat()}T{time_part}+09:00"
     return value.isoformat()
+
+
+def split_date_range(start_date: dt.date, end_date: dt.date, chunk_days: int = MAX_REQUEST_RANGE_DAYS) -> List[Tuple[dt.date, dt.date]]:
+    if start_date > end_date:
+        raise SystemExit(f"Invalid date range: start={start_date} end={end_date}")
+
+    ranges: List[Tuple[dt.date, dt.date]] = []
+    cursor = start_date
+    step = dt.timedelta(days=chunk_days - 1)
+    while cursor <= end_date:
+        chunk_end = min(cursor + step, end_date)
+        ranges.append((cursor, chunk_end))
+        cursor = chunk_end + dt.timedelta(days=1)
+    return ranges
 
 
 def parse_link_header(link_header: Optional[str]) -> Dict[str, str]:
@@ -313,29 +328,34 @@ def main() -> None:
                 for source_name, source in sources.items():
                     path = source.get("path", "")
                     date_params = source.get("date_params", {})
-                    params = dict(source.get("params", {}))
-                    if date_params.get("start"):
-                        params[date_params["start"]] = format_date_param(date_params["start"], start_date, is_end=False)
-                    if date_params.get("end"):
-                        params[date_params["end"]] = format_date_param(date_params["end"], end_date, is_end=True)
-                    if source.get("per_page"):
-                        params["per_page"] = source["per_page"]
-
                     url = f"{base_url}{path}"
-                    records = fetch_paginated(url, headers, params)
-                    explode_key = source.get("explode")
-                    root_records = None
-                    if explode_key:
-                        records, root_records = explode_records(records, explode_key)
+                    date_chunks = split_date_range(start_date, end_date)
+                    all_records: List[Dict[str, Any]] = []
+                    for chunk_start, chunk_end in date_chunks:
+                        params = dict(source.get("params", {}))
+                        if date_params.get("start"):
+                            params[date_params["start"]] = format_date_param(date_params["start"], chunk_start, is_end=False)
+                        if date_params.get("end"):
+                            params[date_params["end"]] = format_date_param(date_params["end"], chunk_end, is_end=True)
+                        if source.get("per_page"):
+                            params["per_page"] = source["per_page"]
 
-                    field_paths = source.get("field_paths", {})
-                    if field_paths:
-                        records = apply_field_paths(records, field_paths, root_records)
+                        records = fetch_paginated(url, headers, params)
+                        explode_key = source.get("explode")
+                        root_records = None
+                        if explode_key:
+                            records, root_records = explode_records(records, explode_key)
 
-                    fields = source.get("fields", [])
-                    if fields:
-                        records = filter_fields(records, fields)
-                    fetched[source_name] = records
+                        field_paths = source.get("field_paths", {})
+                        if field_paths:
+                            records = apply_field_paths(records, field_paths, root_records)
+
+                        fields = source.get("fields", [])
+                        if fields:
+                            records = filter_fields(records, fields)
+                        all_records.extend(records)
+
+                    fetched[source_name] = all_records
 
                 primary_records = fetched.get(primary_source_name, [])
                 merge_key = dataset_config.get("merge_key", "reservation_id")
