@@ -18,6 +18,7 @@ except ImportError as exc:
 
 ENV_PATH = Path(".env")
 CONFIG_PATH = Path("config.yaml")
+MAX_REQUEST_RANGE_DAYS = 30
 
 
 def load_env(path: Path) -> None:
@@ -64,6 +65,20 @@ def format_date_param(param_name: str, value: dt.date, is_end: bool) -> str:
         time_part = "23:59:59" if is_end else "00:00:00"
         return f"{value.isoformat()}T{time_part}+09:00"
     return value.isoformat()
+
+
+def split_date_range(start_date: dt.date, end_date: dt.date, chunk_days: int = MAX_REQUEST_RANGE_DAYS) -> List[Tuple[dt.date, dt.date]]:
+    if start_date > end_date:
+        raise SystemExit(f"Invalid date range: start={start_date} end={end_date}")
+
+    ranges: List[Tuple[dt.date, dt.date]] = []
+    cursor = start_date
+    step = dt.timedelta(days=chunk_days - 1)
+    while cursor <= end_date:
+        chunk_end = min(cursor + step, end_date)
+        ranges.append((cursor, chunk_end))
+        cursor = chunk_end + dt.timedelta(days=1)
+    return ranges
 
 
 def parse_link_header(link_header: Optional[str]) -> Dict[str, str]:
@@ -175,6 +190,9 @@ def filter_fields(records: Iterable[Dict[str, Any]], fields: List[str]) -> List[
     return filtered
 
 
+def add_constant_field(records: List[Dict[str, Any]], field_name: str, value: Any) -> List[Dict[str, Any]]:
+    return [{**record, field_name: value} for record in records]
+
 def merge_records(
     primary: List[Dict[str, Any]],
     secondary: List[Dict[str, Any]],
@@ -216,15 +234,26 @@ def write_json(path: Path, records: List[Dict[str, Any]]) -> None:
     path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def upload_to_s3(path: Path, bucket: str, key: str, region: Optional[str]) -> None:
+def upload_to_s3(
+    path: Path,
+    bucket_name: str,
+    file_name: str,
+    access_key_id: str,
+    secret_access_key: str,
+    region: Optional[str],
+) -> None:
     try:
         import boto3
     except ImportError as exc:
         raise SystemExit("boto3 is required for S3 upload. Install with `pip install boto3`.") from exc
 
-    session = boto3.session.Session(region_name=region)
+    session = boto3.session.Session(
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        region_name=region,
+    )
     client = session.client("s3")
-    client.upload_file(str(path), bucket, key)
+    client.upload_file(str(path), bucket_name, file_name)
 
 
 def build_headers(token: str, token_header: str) -> Dict[str, str]:
@@ -313,29 +342,34 @@ def main() -> None:
                 for source_name, source in sources.items():
                     path = source.get("path", "")
                     date_params = source.get("date_params", {})
-                    params = dict(source.get("params", {}))
-                    if date_params.get("start"):
-                        params[date_params["start"]] = format_date_param(date_params["start"], start_date, is_end=False)
-                    if date_params.get("end"):
-                        params[date_params["end"]] = format_date_param(date_params["end"], end_date, is_end=True)
-                    if source.get("per_page"):
-                        params["per_page"] = source["per_page"]
-
                     url = f"{base_url}{path}"
-                    records = fetch_paginated(url, headers, params)
-                    explode_key = source.get("explode")
-                    root_records = None
-                    if explode_key:
-                        records, root_records = explode_records(records, explode_key)
+                    date_chunks = split_date_range(start_date, end_date)
+                    all_records: List[Dict[str, Any]] = []
+                    for chunk_start, chunk_end in date_chunks:
+                        params = dict(source.get("params", {}))
+                        if date_params.get("start"):
+                            params[date_params["start"]] = format_date_param(date_params["start"], chunk_start, is_end=False)
+                        if date_params.get("end"):
+                            params[date_params["end"]] = format_date_param(date_params["end"], chunk_end, is_end=True)
+                        if source.get("per_page"):
+                            params["per_page"] = source["per_page"]
 
-                    field_paths = source.get("field_paths", {})
-                    if field_paths:
-                        records = apply_field_paths(records, field_paths, root_records)
+                        records = fetch_paginated(url, headers, params)
+                        explode_key = source.get("explode")
+                        root_records = None
+                        if explode_key:
+                            records, root_records = explode_records(records, explode_key)
 
-                    fields = source.get("fields", [])
-                    if fields:
-                        records = filter_fields(records, fields)
-                    fetched[source_name] = records
+                        field_paths = source.get("field_paths", {})
+                        if field_paths:
+                            records = apply_field_paths(records, field_paths, root_records)
+
+                        fields = source.get("fields", [])
+                        if fields:
+                            records = filter_fields(records, fields)
+                        all_records.extend(records)
+
+                    fetched[source_name] = all_records
 
                 primary_records = fetched.get(primary_source_name, [])
                 merge_key = dataset_config.get("merge_key", "reservation_id")
@@ -348,6 +382,11 @@ def main() -> None:
 
                 if output_fields:
                     merged_records = filter_fields(merged_records, output_fields)
+
+                if output_format == "csv":
+                    merged_records = add_constant_field(merged_records, "facility_id", 1)
+                    if output_fields and "facility_id" not in output_fields:
+                        output_fields = [*output_fields, "facility_id"]
 
                 extension = "json" if output_format == "json" else "csv"
                 base_name = f"{dataset_name}_{range_name}_{output_date_suffix}"
@@ -370,13 +409,29 @@ def main() -> None:
                     )
 
                 if s3_enabled:
-                    bucket = s3_config.get("bucket")
-                    prefix = s3_config.get("prefix", "")
+                    bucket_name = str(s3_config.get("bucket_name", "")).strip()
+                    file_name = str(s3_config.get("file_name", "")).strip()
+                    access_key_id = str(s3_config.get("access_key_id", "")).strip()
+                    secret_access_key = str(s3_config.get("secret_access_key", "")).strip()
                     region = s3_config.get("region")
-                    if not bucket:
-                        raise SystemExit("S3 bucket is required when s3.enabled is true")
-                    key = "/".join(part.strip("/") for part in [prefix, filename] if part)
-                    upload_to_s3(output_path, bucket, key, region)
+
+                    if not bucket_name:
+                        raise SystemExit("s3.bucket_name is required when s3.enabled is true")
+                    if not file_name:
+                        raise SystemExit("s3.file_name is required when s3.enabled is true")
+                    if not access_key_id:
+                        raise SystemExit("s3.access_key_id is required when s3.enabled is true")
+                    if not secret_access_key:
+                        raise SystemExit("s3.secret_access_key is required when s3.enabled is true")
+
+                    upload_to_s3(
+                        output_path,
+                        bucket_name,
+                        file_name,
+                        access_key_id,
+                        secret_access_key,
+                        region,
+                    )
 
     print("Data export completed.")
 
