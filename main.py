@@ -190,6 +190,9 @@ def filter_fields(records: Iterable[Dict[str, Any]], fields: List[str]) -> List[
     return filtered
 
 
+def add_constant_field(records: List[Dict[str, Any]], field_name: str, value: Any) -> List[Dict[str, Any]]:
+    return [{**record, field_name: value} for record in records]
+
 def merge_records(
     primary: List[Dict[str, Any]],
     secondary: List[Dict[str, Any]],
@@ -379,6 +382,11 @@ def main() -> None:
 
                 if output_fields:
                     merged_records = filter_fields(merged_records, output_fields)
+
+                if output_format == "csv":
+                    merged_records = add_constant_field(merged_records, "facility_id", 1)
+                    if output_fields and "facility_id" not in output_fields:
+                        output_fields = [*output_fields, "facility_id"]
 
                 extension = "json" if output_format == "json" else "csv"
                 base_name = f"{dataset_name}_{range_name}_{output_date_suffix}"
