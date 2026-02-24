@@ -47,11 +47,12 @@ python debug_fetch.py --start-date 2026-02-01 --end-date 2026-02-28 --output-for
 
 - The default date offsets are `history: -2 ~ -2` and `onhand: -1 ~ +178` from today.
 - To override dates manually, set `date_ranges.manual.enabled: true` and fill `date_ranges.manual.history/onhand.start,end` in `config.yaml`.
-- When enabling S3 uploads, ensure AWS credentials are available via environment variables or AWS config files.
+- S3アップロードを有効化する場合は `config.yaml` の `output.s3.bucket_name` / `file_name` / `access_key_id` / `secret_access_key` を設定してください。
 - This script is production-only. If `API_BASE_URL` is unset, it defaults to `https://api.aipass.jp/public`.
 - If you only have an ID/password (no API token), set `API_ID` and `API_PASSWORD` and leave `API_TOKEN` empty (or keep the placeholder `your_token_here`). The script will request an access token from `{API_BASE_URL}/oauth/token` by default.
 - To override the token endpoint, set `API_AUTH_URL` explicitly (e.g., `https://api.aipass.jp/public/oauth/token`).
 - エンドポイントごとに仕様上の主要日付項目を使う設定です：`/reservations` は `check_in_date_from/to`、`/sales-details` は `sales_date_from/to`。
+- API仕様制限に合わせ、日付範囲は内部的に30日単位へ分割して順次取得し、合算した結果を最終CSV/JSONとして出力します。
 - `*_at_from/to` は date-time 形式が必須のため、実行時に `YYYY-MM-DDT00:00:00+09:00` / `YYYY-MM-DDT23:59:59+09:00` に自動変換して送信します。
 - `reservations.csv` の顧客項目は `/reservations` レスポンス内の `related_guest` から展開して出力します。
 - `related_guest` を確実に返すため、`main.py` の `/reservations` リクエストでは `include_related_guest=1` を付与しています。

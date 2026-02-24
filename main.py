@@ -231,15 +231,26 @@ def write_json(path: Path, records: List[Dict[str, Any]]) -> None:
     path.write_text(json.dumps(records, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def upload_to_s3(path: Path, bucket: str, key: str, region: Optional[str]) -> None:
+def upload_to_s3(
+    path: Path,
+    bucket_name: str,
+    file_name: str,
+    access_key_id: str,
+    secret_access_key: str,
+    region: Optional[str],
+) -> None:
     try:
         import boto3
     except ImportError as exc:
         raise SystemExit("boto3 is required for S3 upload. Install with `pip install boto3`.") from exc
 
-    session = boto3.session.Session(region_name=region)
+    session = boto3.session.Session(
+        aws_access_key_id=access_key_id,
+        aws_secret_access_key=secret_access_key,
+        region_name=region,
+    )
     client = session.client("s3")
-    client.upload_file(str(path), bucket, key)
+    client.upload_file(str(path), bucket_name, file_name)
 
 
 def build_headers(token: str, token_header: str) -> Dict[str, str]:
@@ -390,13 +401,29 @@ def main() -> None:
                     )
 
                 if s3_enabled:
-                    bucket = s3_config.get("bucket")
-                    prefix = s3_config.get("prefix", "")
+                    bucket_name = str(s3_config.get("bucket_name", "")).strip()
+                    file_name = str(s3_config.get("file_name", "")).strip()
+                    access_key_id = str(s3_config.get("access_key_id", "")).strip()
+                    secret_access_key = str(s3_config.get("secret_access_key", "")).strip()
                     region = s3_config.get("region")
-                    if not bucket:
-                        raise SystemExit("S3 bucket is required when s3.enabled is true")
-                    key = "/".join(part.strip("/") for part in [prefix, filename] if part)
-                    upload_to_s3(output_path, bucket, key, region)
+
+                    if not bucket_name:
+                        raise SystemExit("s3.bucket_name is required when s3.enabled is true")
+                    if not file_name:
+                        raise SystemExit("s3.file_name is required when s3.enabled is true")
+                    if not access_key_id:
+                        raise SystemExit("s3.access_key_id is required when s3.enabled is true")
+                    if not secret_access_key:
+                        raise SystemExit("s3.secret_access_key is required when s3.enabled is true")
+
+                    upload_to_s3(
+                        output_path,
+                        bucket_name,
+                        file_name,
+                        access_key_id,
+                        secret_access_key,
+                        region,
+                    )
 
     print("Data export completed.")
 
