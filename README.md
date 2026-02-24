@@ -47,7 +47,7 @@ python debug_fetch.py --start-date 2026-02-01 --end-date 2026-02-28 --output-for
 
 - The default date offsets are `history: -2 ~ -2` and `onhand: -1 ~ +178` from today.
 - To override dates manually, set `date_ranges.manual.enabled: true` and fill `date_ranges.manual.history/onhand.start,end` in `config.yaml`.
-- S3アップロードを有効化する場合は `config.yaml` の `output.s3.bucket_name` / `file_name` / `access_key_id` / `secret_access_key` を設定してください。
+- S3アップロードを有効化する場合は `config.yaml` の `output.s3.bucket_name` / `access_key_id` / `secret_access_key` を設定してください。`output.s3.file_name` は任意で、未設定時はCSV/JSON出力と同名、`aipass/exports` のように指定するとそのプレフィックス配下へ同名保存、`{file_name}` を含めると置換して保存します。
 - This script is production-only. If `API_BASE_URL` is unset, it defaults to `https://api.aipass.jp/public`.
 - If you only have an ID/password (no API token), set `API_ID` and `API_PASSWORD` and leave `API_TOKEN` empty (or keep the placeholder `your_token_here`). The script will request an access token from `{API_BASE_URL}/oauth/token` by default.
 - To override the token endpoint, set `API_AUTH_URL` explicitly (e.g., `https://api.aipass.jp/public/oauth/token`).

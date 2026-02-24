@@ -9,7 +9,7 @@ output:
   s3:
     enabled: false
     bucket_name: ""
-    file_name: "" # e.g. aipass/exports/sales_20260101.csv
+    file_name: "" # optional: ""=CSVと同名 / "aipass/exports"=配下に同名 / "aipass/{file_name}"=プレースホルダ
     access_key_id: ""
     secret_access_key: ""
     region: "ap-northeast-1"

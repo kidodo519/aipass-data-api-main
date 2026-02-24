@@ -256,6 +256,17 @@ def upload_to_s3(
     client.upload_file(str(path), bucket_name, file_name)
 
 
+def resolve_s3_file_name(configured_name: str, generated_file_name: str) -> str:
+    configured = configured_name.strip()
+    if not configured:
+        return generated_file_name
+
+    if "{file_name}" in configured:
+        return configured.replace("{file_name}", generated_file_name)
+
+    return f"{configured.rstrip('/')}/{generated_file_name}"
+
+
 def build_headers(token: str, token_header: str) -> Dict[str, str]:
     headers = {"Accept": "application/json"}
     if token:
@@ -410,15 +421,13 @@ def main() -> None:
 
                 if s3_enabled:
                     bucket_name = str(s3_config.get("bucket_name", "")).strip()
-                    file_name = str(s3_config.get("file_name", "")).strip()
+                    file_name = resolve_s3_file_name(str(s3_config.get("file_name", "")), filename)
                     access_key_id = str(s3_config.get("access_key_id", "")).strip()
                     secret_access_key = str(s3_config.get("secret_access_key", "")).strip()
                     region = s3_config.get("region")
 
                     if not bucket_name:
                         raise SystemExit("s3.bucket_name is required when s3.enabled is true")
-                    if not file_name:
-                        raise SystemExit("s3.file_name is required when s3.enabled is true")
                     if not access_key_id:
                         raise SystemExit("s3.access_key_id is required when s3.enabled is true")
                     if not secret_access_key:
