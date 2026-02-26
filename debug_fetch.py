@@ -129,7 +129,9 @@ def write_json(path: Path, records: List[Dict[str, Any]]) -> None:
 def main() -> None:
     load_env(Path(".env"))
 
-    parser = argparse.ArgumentParser(description="Debug fetch for reservations/guests full data in a period")
+    parser = argparse.ArgumentParser(
+        description="Debug fetch for reservations/guests/sales-details full data in a period"
+    )
     parser.add_argument("--start-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--end-date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--output-format", choices=["csv", "json"], default="json")
@@ -174,6 +176,14 @@ def main() -> None:
             "params": {
                 "updated_at_from": f"{start.isoformat()}T00:00:00+09:00",
                 "updated_at_to": f"{end.isoformat()}T23:59:59+09:00",
+                "per_page": 1000,
+            },
+        },
+        "sales-details": {
+            "path": "/sales-details",
+            "params": {
+                "sales_date_from": start.isoformat(),
+                "sales_date_to": end.isoformat(),
                 "per_page": 1000,
             },
         },
