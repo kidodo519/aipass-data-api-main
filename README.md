@@ -26,9 +26,9 @@ API_PASSWORD=your_password_here
 python main.py
 ```
 
-## Debug fetch (reservations / guests full records)
+## Debug fetch (reservations / guests / sales-details full records)
 
-指定期間で `reservations` と `guests` の全量を切り分け確認したい場合は `debug_fetch.py` を使ってください。
+指定期間で `reservations` / `guests` / `sales-details` の全量を切り分け確認したい場合は `debug_fetch.py` を使ってください。
 
 ```bash
 python debug_fetch.py --start-date 2026-02-01 --end-date 2026-02-28 --output-format json
@@ -41,6 +41,7 @@ python debug_fetch.py --start-date 2026-02-01 --end-date 2026-02-28 --output-for
 このスクリプトは以下の条件で取得します。
 - `reservations`: `check_in_date_from` / `check_in_date_to`（`include_related_guest=1`）
 - `guests`: `updated_at_from` / `updated_at_to`
+- `sales-details`: `sales_date_from` / `sales_date_to`
 - `.env` を自動読込するため、`API_TOKEN` または `API_ID`/`API_PASSWORD` は `.env` に記載すれば利用されます。
 
 ## Notes
