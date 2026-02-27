@@ -1,17 +1,17 @@
 output:
   format: csv # csv or json
   csv:
-    prefix: ""
+    prefix: "ねぎや陵楓閣_"
     encoding: "utf-8-sig"
   local_output:
     enabled: true
     directory: processed-csv
   s3:
-    enabled: false
-    bucket_name: ""
-    file_name: "" # optional: ""=CSVと同名 / "aipass/exports"=配下に同名 / "aipass/{file_name}"=プレースホルダ
-    access_key_id: ""
-    secret_access_key: ""
+    enabled: true
+    bucket_name: onsen-jasper-importer-prod-data-xxxx
+    access_key_id: 'xxxxx'
+    secret_access_key: 'xxxxx'
+    file_name: 'pms-reservations/'
     region: "ap-northeast-1"
 
 date_ranges:
@@ -24,11 +24,11 @@ date_ranges:
   manual:
     enabled: false
     history:
-      start: ""
-      end: ""
+      start: "2026-01-01"
+      end: "2026-01-01"
     onhand:
-      start: ""
-      end: ""
+      start: "2026-01-02"
+      end: "2026-01-31"
 
 datasets:
   reservations:
@@ -37,14 +37,23 @@ datasets:
     output_fields:
       - reservation_id
       - check_in_date
+      - check_out_date
       - reserved_at
       - reservation_status
       - updated_at
       - number_of_adults
       - number_of_children
+      - number_of_male
+      - number_of_female
+      - number_of_child_a
+      - number_of_child_b
+      - number_of_child_c
+      - number_of_child_d
+      - number_of_infants
       - total_amount
       - sales_office_company_name
       - package_plan_name
+      - package_plan_code
       - external_confirmation_code
       - total_stay_count
       - guest_id
@@ -54,6 +63,7 @@ datasets:
       - email
       - is_delivery_agreement
       - address
+      - nationality
     sources:
       reservations:
         path: /reservations
@@ -64,33 +74,43 @@ datasets:
           end: check_in_date_to
         field_paths:
           total_stay_count: related_guest.total_stay_count
-          guest_id: related_guest.guest_id
-          name_first: related_guest.name_first
-          name_last: related_guest.name_last
-          phone_mobile: related_guest.phone_mobile
-          email: related_guest.email
+          name_first: primary_guest.name_first
+          name_last: primary_guest.name_last
+          phone_mobile: primary_guest.phone_mobile
+          email: primary_guest.email
           is_delivery_agreement: related_guest.is_delivery_agreement
-          address: related_guest.address
+          address: primary_guest.address
+          nationality: related_guest.nationality
         fields:
-          - reservation_id
-          - check_in_date
-          - reserved_at
-          - reservation_status
-          - updated_at
-          - number_of_adults
-          - number_of_children
-          - total_amount
-          - sales_office_company_name
-          - package_plan_name
-          - external_confirmation_code
-          - total_stay_count
-          - guest_id
-          - name_first
-          - name_last
-          - phone_mobile
-          - email
-          - is_delivery_agreement
-          - address
+        - reservation_id
+        - check_in_date
+        - check_out_date
+        - reserved_at
+        - reservation_status
+        - updated_at
+        - number_of_adults
+        - number_of_children
+        - number_of_male
+        - number_of_female
+        - number_of_child_a
+        - number_of_child_b
+        - number_of_child_c
+        - number_of_child_d
+        - number_of_infants
+        - total_amount
+        - sales_office_company_name
+        - package_plan_name
+        - package_plan_code
+        - external_confirmation_code
+        - total_stay_count
+        - guest_id
+        - name_first
+        - name_last
+        - phone_mobile
+        - email
+        - is_delivery_agreement
+        - address
+        - nationality
 
   sales:
     primary_source: sales
@@ -98,8 +118,12 @@ datasets:
     output_fields:
       - reservation_id
       - sales_date
+      - sales_department_code
       - sales_department_name
+      - sales_subject_code
       - sales_subject_name
+      - sales_sub_subject_code
+      - sales_sub_subject_name
       - amount
       - amount_excluding_tax
       - quantity
@@ -111,16 +135,24 @@ datasets:
           end: sales_date_to
         field_paths:
           reservation_id: reservation.reservation_id
+          sales_department_code: sales_department.sales_department_code
           sales_department_name: sales_department.sales_department_name
+          sales_subject_code: sales_subject.sales_subject_code
           sales_subject_name: sales_subject.sales_subject_name
+          sales_sub_subject_code: sales_sub_subject.sales_subject_code
+          sales_sub_subject_name: sales_sub_subject.sales_subject_name
         fields:
-          - reservation_id
-          - sales_date
-          - sales_department_name
-          - sales_subject_name
-          - amount
-          - amount_excluding_tax
-          - quantity
+        - reservation_id
+        - sales_date
+        - sales_department_code
+        - sales_department_name
+        - sales_subject_code
+        - sales_subject_name
+        - sales_sub_subject_code
+        - sales_sub_subject_name
+        - amount
+        - amount_excluding_tax
+        - quantity
 
   rooms:
     primary_source: rooms
