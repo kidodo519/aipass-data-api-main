@@ -193,6 +193,17 @@ def filter_fields(records: Iterable[Dict[str, Any]], fields: List[str]) -> List[
 def add_constant_field(records: List[Dict[str, Any]], field_name: str, value: Any) -> List[Dict[str, Any]]:
     return [{**record, field_name: value} for record in records]
 
+
+def add_guest_name_field(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    with_guest_name: List[Dict[str, Any]] = []
+    for record in records:
+        name_first = str(record.get("name_first") or "").strip()
+        name_last = str(record.get("name_last") or "").strip()
+        full_name = " ".join(part for part in [name_first, name_last] if part)
+        with_guest_name.append({**record, "guest_name": full_name})
+    return with_guest_name
+
+
 def merge_records(
     primary: List[Dict[str, Any]],
     secondary: List[Dict[str, Any]],
@@ -395,7 +406,10 @@ def main() -> None:
                     merged_records = filter_fields(merged_records, output_fields)
 
                 if output_format == "csv":
+                    merged_records = add_guest_name_field(merged_records)
                     merged_records = add_constant_field(merged_records, "facility_id", 1)
+                    if output_fields and "guest_name" not in output_fields:
+                        output_fields = [*output_fields, "guest_name"]
                     if output_fields and "facility_id" not in output_fields:
                         output_fields = [*output_fields, "facility_id"]
 
