@@ -4,6 +4,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 try:
@@ -194,14 +195,55 @@ def add_constant_field(records: List[Dict[str, Any]], field_name: str, value: An
     return [{**record, field_name: value} for record in records]
 
 
-def add_guest_name_field(records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    with_guest_name: List[Dict[str, Any]] = []
+def parse_decimal(value: Any) -> Optional[Decimal]:
+    if value is None:
+        return None
+    if isinstance(value, Decimal):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return Decimal(str(value))
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return Decimal(text)
+    except InvalidOperation:
+        return None
+
+
+def normalize_decimal_output(value: Decimal) -> Any:
+    if value == value.to_integral_value():
+        return int(value)
+    return float(value)
+
+
+def apply_computed_fields(records: List[Dict[str, Any]], computed_fields: Dict[str, Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not computed_fields:
+        return records
+
+    computed_records: List[Dict[str, Any]] = []
     for record in records:
-        name_first = str(record.get("name_first") or "").strip()
-        name_last = str(record.get("name_last") or "").strip()
-        full_name = " ".join(part for part in [name_first, name_last] if part)
-        with_guest_name.append({**record, "guest_name": full_name})
-    return with_guest_name
+        updated = dict(record)
+        for output_field, definition in computed_fields.items():
+            operation = str(definition.get("operation", "")).strip().lower()
+            if operation == "subtract":
+                left = parse_decimal(updated.get(definition.get("left")))
+                right = parse_decimal(updated.get(definition.get("right")))
+                if left is None or right is None:
+                    updated[output_field] = None
+                else:
+                    updated[output_field] = normalize_decimal_output(left - right)
+            elif operation == "concat":
+                fields = definition.get("fields", [])
+                separator = str(definition.get("separator", " "))
+                values = [str(updated.get(field) or "").strip() for field in fields]
+                updated[output_field] = separator.join(value for value in values if value)
+            else:
+                updated[output_field] = None
+        computed_records.append(updated)
+    return computed_records
 
 
 def merge_records(
@@ -402,14 +444,15 @@ def main() -> None:
                         continue
                     merged_records = merge_records(merged_records, records, merge_key)
 
+                computed_fields = dataset_config.get("computed_fields", {})
+                if computed_fields:
+                    merged_records = apply_computed_fields(merged_records, computed_fields)
+
                 if output_fields:
                     merged_records = filter_fields(merged_records, output_fields)
 
                 if output_format == "csv":
-                    merged_records = add_guest_name_field(merged_records)
                     merged_records = add_constant_field(merged_records, "facility_id", 1)
-                    if output_fields and "guest_name" not in output_fields:
-                        output_fields = [*output_fields, "guest_name"]
                     if output_fields and "facility_id" not in output_fields:
                         output_fields = [*output_fields, "facility_id"]
 
