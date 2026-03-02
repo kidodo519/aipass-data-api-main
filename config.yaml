@@ -59,11 +59,19 @@ datasets:
       - guest_id
       - name_first
       - name_last
+      - guest_name
       - phone_mobile
       - email
       - is_delivery_agreement
       - address
       - nationality
+    computed_fields:
+      guest_name:
+        operation: concat
+        fields:
+          - name_last
+          - name_first
+        separator: " "
     sources:
       reservations:
         path: /reservations
@@ -126,7 +134,13 @@ datasets:
       - sales_sub_subject_name
       - amount
       - amount_excluding_tax
+      - consumption_tax
       - quantity
+    computed_fields:
+      consumption_tax:
+        operation: subtract
+        left: amount
+        right: amount_excluding_tax
     sources:
       sales:
         path: /sales-details
