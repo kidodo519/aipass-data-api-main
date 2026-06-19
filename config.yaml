@@ -1,3 +1,6 @@
+logging:
+  directory: logs
+
 output:
   format: csv # csv or json
   csv:
