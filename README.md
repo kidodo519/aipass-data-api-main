@@ -26,6 +26,12 @@ API_PASSWORD=your_password_here
 python main.py
 ```
 
+## Logs
+
+実行ごとに `config.yaml` の `logging.directory`（既定: `logs`）配下へ `aipass_export_yyyymmdd_HHMMSS.log` を出力します。
+ログには、データセット・期間（history/onhand）・ソース・30日分割チャンクごとのリクエストURL/パラメータ、HTTPステータス、取得件数、`assign_rooms` 展開前後の件数、出力ファイルパス、S3アップロード結果が記録されます。
+`rooms_onhand` が空になる場合は、ログ内の `dataset=rooms range=onhand` と `Exploded records` の行を確認してください。`before` が0なら `/reservations` の取得結果自体が0件、`before` があるのに `after` が0ならレスポンス内の `assign_rooms` が空または存在しない可能性があります。
+
 ## Notes
 
 - The default date offsets are `history: -2 ~ -2` and `onhand: -1 ~ +178` from today.

@@ -1,6 +1,7 @@
 import csv
 import datetime as dt
 import json
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -20,6 +21,31 @@ except ImportError as exc:
 ENV_PATH = Path(".env")
 CONFIG_PATH = Path("config.yaml")
 MAX_REQUEST_RANGE_DAYS = 30
+LOGGER_NAME = "aipass_data_exporter"
+
+
+def setup_logger(config: Dict[str, Any]) -> logging.Logger:
+    log_config = config.get("logging", {})
+    log_dir = Path(log_config.get("directory", "logs"))
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_file = log_dir / f"aipass_export_{dt.datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+    logger = logging.getLogger(LOGGER_NAME)
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    logger.propagate = False
+
+    formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+    file_handler = logging.FileHandler(log_file, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+
+    console_handler = logging.StreamHandler()
+    console_handler.setFormatter(formatter)
+    logger.addHandler(console_handler)
+
+    logger.info("Log file created: %s", log_file)
+    return logger
 
 
 def load_env(path: Path) -> None:
@@ -166,21 +192,36 @@ def fetch_paginated(
     url: str,
     headers: Dict[str, str],
     params: Dict[str, Any],
+    logger: Optional[logging.Logger] = None,
+    context: str = "",
 ) -> List[Dict[str, Any]]:
     records: List[Dict[str, Any]] = []
     next_url = url
     next_params = params
+    page = 1
     while next_url:
+        if logger:
+            logger.info("Request start%s page=%s url=%s params=%s", f" [{context}]" if context else "", page, next_url, next_params)
         response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
+        if logger:
+            logger.info("Response received%s page=%s status=%s url=%s", f" [{context}]" if context else "", page, response.status_code, response.url)
         if response.status_code >= 400:
             detail = response.text.strip() or "(empty response body)"
+            if logger:
+                logger.error("API request failed%s status=%s reason=%s url=%s body=%s", f" [{context}]" if context else "", response.status_code, response.reason, response.url, detail)
             raise SystemExit(
                 f"API request failed: {response.status_code} {response.reason} | URL: {response.url} | body: {detail}"
             )
-        records.extend(extract_records(response.json()))
+        page_records = extract_records(response.json())
+        records.extend(page_records)
+        if logger:
+            logger.info("Records extracted%s page=%s count=%s total=%s", f" [{context}]" if context else "", page, len(page_records), len(records))
         links = parse_link_header(response.headers.get("Link"))
         next_url = links.get("next")
         next_params = None
+        page += 1
+    if logger:
+        logger.info("Request completed%s total_records=%s", f" [{context}]" if context else "", len(records))
     return records
 
 
@@ -351,6 +392,8 @@ def fetch_access_token(auth_url: str, user_id: str, password: str) -> str:
 def main() -> None:
     load_env(ENV_PATH)
     config = load_config(CONFIG_PATH)
+    logger = setup_logger(config)
+    logger.info("Data export started.")
 
     api_env = os.environ.get("API_ENV", "").strip().lower()
     base_url = os.environ.get("API_BASE_URL", "").rstrip("/")
@@ -366,7 +409,9 @@ def main() -> None:
 
     if not token:
         if not (user_id and password):
+            logger.error("API_ID and API_PASSWORD are required to fetch an access token.")
             raise SystemExit("API_ID and API_PASSWORD are required to fetch an access token.")
+        logger.info("Fetching access token from %s", auth_url)
         token = fetch_access_token(auth_url, user_id, password)
 
     headers = build_headers(token, token_header)
@@ -390,7 +435,11 @@ def main() -> None:
 
     datasets = config.get("datasets", {})
     if not datasets:
+        logger.error("No datasets configured in config.yaml")
         raise SystemExit("No datasets configured in config.yaml")
+
+    logger.info("Configured ranges: history=%s to %s, onhand=%s to %s", ranges["history"][0], ranges["history"][1], ranges["onhand"][0], ranges["onhand"][1])
+    logger.info("Configured datasets: %s", ", ".join(datasets.keys()))
 
     with tempfile.TemporaryDirectory() as temp_dir:
         temp_path = Path(temp_dir)
@@ -401,7 +450,9 @@ def main() -> None:
             primary_source_name = dataset_config.get("primary_source") or next(iter(sources.keys()))
             output_fields = dataset_config.get("output_fields", [])
 
+            logger.info("Dataset start: %s primary_source=%s output_fields=%s", dataset_name, primary_source_name, output_fields)
             for range_name, (start_date, end_date) in ranges.items():
+                logger.info("Range start: dataset=%s range=%s start=%s end=%s", dataset_name, range_name, start_date, end_date)
                 fetched: Dict[str, List[Dict[str, Any]]] = {}
                 for source_name, source in sources.items():
                     path = source.get("path", "")
@@ -409,6 +460,7 @@ def main() -> None:
                     url = f"{base_url}{path}"
                     date_chunks = split_date_range(start_date, end_date)
                     all_records: List[Dict[str, Any]] = []
+                    logger.info("Source start: dataset=%s range=%s source=%s path=%s chunks=%s", dataset_name, range_name, source_name, path, len(date_chunks))
                     for chunk_start, chunk_end in date_chunks:
                         params = dict(source.get("params", {}))
                         if date_params.get("start"):
@@ -418,11 +470,14 @@ def main() -> None:
                         if source.get("per_page"):
                             params["per_page"] = source["per_page"]
 
-                        records = fetch_paginated(url, headers, params)
+                        context = f"dataset={dataset_name} range={range_name} source={source_name} chunk={chunk_start}..{chunk_end}"
+                        records = fetch_paginated(url, headers, params, logger, context)
                         explode_key = source.get("explode")
                         root_records = None
                         if explode_key:
+                            before_explode_count = len(records)
                             records, root_records = explode_records(records, explode_key)
+                            logger.info("Exploded records: %s explode_key=%s before=%s after=%s", context, explode_key, before_explode_count, len(records))
 
                         field_paths = source.get("field_paths", {})
                         if field_paths:
@@ -434,6 +489,7 @@ def main() -> None:
                         all_records.extend(records)
 
                     fetched[source_name] = all_records
+                    logger.info("Source completed: dataset=%s range=%s source=%s total_records=%s", dataset_name, range_name, source_name, len(all_records))
 
                 primary_records = fetched.get(primary_source_name, [])
                 merge_key = dataset_config.get("merge_key", "reservation_id")
@@ -450,6 +506,8 @@ def main() -> None:
 
                 if output_fields:
                     merged_records = filter_fields(merged_records, output_fields)
+
+                logger.info("Merged dataset: dataset=%s range=%s primary_records=%s output_records=%s", dataset_name, range_name, len(primary_records), len(merged_records))
 
                 if output_format == "csv":
                     merged_records = add_constant_field(merged_records, "facility_id", 1)
@@ -475,6 +533,7 @@ def main() -> None:
                         output_fields or sorted(merged_records[0].keys()) if merged_records else [],
                         csv_encoding,
                     )
+                logger.info("Output written: dataset=%s range=%s records=%s path=%s", dataset_name, range_name, len(merged_records), output_path)
 
                 if s3_enabled:
                     bucket_name = str(s3_config.get("bucket_name", "")).strip()
@@ -498,7 +557,9 @@ def main() -> None:
                         secret_access_key,
                         region,
                     )
+                    logger.info("S3 upload completed: dataset=%s range=%s bucket=%s key=%s", dataset_name, range_name, bucket_name, file_name)
 
+    logger.info("Data export completed.")
     print("Data export completed.")
 
 
