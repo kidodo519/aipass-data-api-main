@@ -181,6 +181,8 @@ datasets:
     sources:
       rooms:
         path: /reservations
+        # Reduce the date window for high-volume room assignment exports to avoid API rate limits.
+        date_chunk_days: 7
         date_params:
           start: check_in_date_from
           end: check_in_date_to
