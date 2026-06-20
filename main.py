@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import tempfile
+import time
 from pathlib import Path
 from decimal import Decimal, InvalidOperation
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -20,7 +21,9 @@ except ImportError as exc:
 
 ENV_PATH = Path(".env")
 CONFIG_PATH = Path("config.yaml")
-MAX_REQUEST_RANGE_DAYS = 30
+DEFAULT_REQUEST_RANGE_DAYS = 30
+RATE_LIMIT_MAX_RETRIES = 5
+RATE_LIMIT_RETRY_STATUS_CODES = {429}
 LOGGER_NAME = "aipass_data_exporter"
 
 
@@ -94,9 +97,18 @@ def format_date_param(param_name: str, value: dt.date, is_end: bool) -> str:
     return value.isoformat()
 
 
-def split_date_range(start_date: dt.date, end_date: dt.date, chunk_days: int = MAX_REQUEST_RANGE_DAYS) -> List[Tuple[dt.date, dt.date]]:
+def get_date_chunk_days(source: Dict[str, Any]) -> int:
+    chunk_days = int(source.get("date_chunk_days", DEFAULT_REQUEST_RANGE_DAYS))
+    if chunk_days < 1:
+        raise SystemExit(f"date_chunk_days must be at least 1: {chunk_days}")
+    return chunk_days
+
+
+def split_date_range(start_date: dt.date, end_date: dt.date, chunk_days: int = DEFAULT_REQUEST_RANGE_DAYS) -> List[Tuple[dt.date, dt.date]]:
     if start_date > end_date:
         raise SystemExit(f"Invalid date range: start={start_date} end={end_date}")
+    if chunk_days < 1:
+        raise SystemExit(f"chunk_days must be at least 1: {chunk_days}")
 
     ranges: List[Tuple[dt.date, dt.date]] = []
     cursor = start_date
@@ -188,6 +200,16 @@ def explode_records(records: List[Dict[str, Any]], explode_key: str) -> Tuple[Li
     return exploded, roots
 
 
+def get_retry_delay_seconds(response: Any, attempt: int) -> float:
+    retry_after = response.headers.get("Retry-After")
+    if retry_after:
+        try:
+            return max(float(retry_after), 0.0)
+        except ValueError:
+            pass
+    return float(2 ** (attempt - 1))
+
+
 def fetch_paginated(
     url: str,
     headers: Dict[str, str],
@@ -200,11 +222,32 @@ def fetch_paginated(
     next_params = params
     page = 1
     while next_url:
-        if logger:
-            logger.info("Request start%s page=%s url=%s params=%s", f" [{context}]" if context else "", page, next_url, next_params)
-        response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
-        if logger:
-            logger.info("Response received%s page=%s status=%s url=%s", f" [{context}]" if context else "", page, response.status_code, response.url)
+        response = None
+        for attempt in range(1, RATE_LIMIT_MAX_RETRIES + 2):
+            if logger:
+                logger.info("Request start%s page=%s attempt=%s url=%s params=%s", f" [{context}]" if context else "", page, attempt, next_url, next_params)
+            response = requests.get(next_url, headers=headers, params=next_params, timeout=30)
+            if logger:
+                logger.info("Response received%s page=%s attempt=%s status=%s url=%s", f" [{context}]" if context else "", page, attempt, response.status_code, response.url)
+
+            if response.status_code not in RATE_LIMIT_RETRY_STATUS_CODES or attempt > RATE_LIMIT_MAX_RETRIES:
+                break
+
+            delay_seconds = get_retry_delay_seconds(response, attempt)
+            if logger:
+                logger.warning(
+                    "Rate limit response%s page=%s attempt=%s status=%s retry_after=%s sleep_seconds=%s",
+                    f" [{context}]" if context else "",
+                    page,
+                    attempt,
+                    response.status_code,
+                    response.headers.get("Retry-After"),
+                    delay_seconds,
+                )
+            time.sleep(delay_seconds)
+
+        if response is None:
+            raise SystemExit("API request failed before a response was received")
         if response.status_code >= 400:
             detail = response.text.strip() or "(empty response body)"
             if logger:
@@ -458,9 +501,10 @@ def main() -> None:
                     path = source.get("path", "")
                     date_params = source.get("date_params", {})
                     url = f"{base_url}{path}"
-                    date_chunks = split_date_range(start_date, end_date)
+                    date_chunk_days = get_date_chunk_days(source)
+                    date_chunks = split_date_range(start_date, end_date, date_chunk_days)
                     all_records: List[Dict[str, Any]] = []
-                    logger.info("Source start: dataset=%s range=%s source=%s path=%s chunks=%s", dataset_name, range_name, source_name, path, len(date_chunks))
+                    logger.info("Source start: dataset=%s range=%s source=%s path=%s chunk_days=%s chunks=%s", dataset_name, range_name, source_name, path, date_chunk_days, len(date_chunks))
                     for chunk_start, chunk_end in date_chunks:
                         params = dict(source.get("params", {}))
                         if date_params.get("start"):
